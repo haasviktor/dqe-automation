@@ -14,8 +14,76 @@ class DataQualityLibrary:
         - check_data_full_data_set   : Full dataset comparison
         - check_dataset_is_not_empty : Consistency (non-empty) validation
         - check_not_null_values      : Validity (not-null) validation
-        - check_no_negative_values   : Validity (non-negative) validation
     """
+
+    @staticmethod
+    def _align_column_dtypes(
+        df1: pd.DataFrame,
+        df2: pd.DataFrame,
+        columns: list
+    ) -> tuple:
+        """
+        Normalize dtypes of specified columns between two DataFrames
+        so they can be safely merged and compared.
+
+        Conversion priority:
+          1. datetime-like  → both cast to datetime64[ns]
+          2. numeric        → both cast to float64
+          3. fallback       → both cast to str
+
+        Args:
+            df1 (pd.DataFrame): First DataFrame (source).
+            df2 (pd.DataFrame): Second DataFrame (target).
+            columns (list): Columns to check and align.
+
+        Returns:
+            tuple:
+                df1_normalized (pd.DataFrame)
+                df2_normalized (pd.DataFrame)
+                dtype_mismatch_report (dict): {col: (df1_dtype, df2_dtype)}
+        """
+        df1 = df1.copy()
+        df2 = df2.copy()
+        dtype_mismatch_report = {}
+
+        for col in columns:
+            dtype1 = df1[col].dtype
+            dtype2 = df2[col].dtype
+
+            # Same dtype — nothing to do
+            if dtype1 == dtype2:
+                continue
+
+            dtype_mismatch_report[col] = (str(dtype1), str(dtype2))
+
+            is_datetime1 = pd.api.types.is_datetime64_any_dtype(dtype1)
+            is_datetime2 = pd.api.types.is_datetime64_any_dtype(dtype2)
+            is_numeric1  = pd.api.types.is_numeric_dtype(dtype1)
+            is_numeric2  = pd.api.types.is_numeric_dtype(dtype2)
+
+            # Priority 1: datetime-like → datetime64[ns]
+            if is_datetime1 or is_datetime2:
+                try:
+                    df1[col] = pd.to_datetime(df1[col])
+                    df2[col] = pd.to_datetime(df2[col])
+                    continue
+                except Exception:
+                    pass
+
+            # Priority 2: numeric → float64
+            if is_numeric1 or is_numeric2:
+                try:
+                    df1[col] = pd.to_numeric(df1[col], errors="raise")
+                    df2[col] = pd.to_numeric(df2[col], errors="raise")
+                    continue
+                except Exception:
+                    pass
+
+            # Priority 3: fallback → str
+            df1[col] = df1[col].astype(str)
+            df2[col] = df2[col].astype(str)
+
+        return df1, df2, dtype_mismatch_report
 
     @staticmethod
     def check_duplicates(df: pd.DataFrame, column_names: list = None) -> None:
@@ -72,14 +140,13 @@ class DataQualityLibrary:
         """
         Perform a full dataset comparison between two DataFrames.
 
-        Checks are performed in two steps:
-          Step 1 — Row count comparison:
-                   If counts differ, uses an outer merge to identify
-                   exactly which rows are missing or extra, and reports them.
-
-          Step 2 — Value comparison:
-                   If counts match, performs a cell-by-cell comparison
-                   using pandas.compare() and reports any mismatched cells.
+        Processing steps:
+          0. Dtype alignment  : normalize mismatched column dtypes
+                                (e.g. object vs datetime64, int vs float)
+          1. Row count check  : if counts differ, use outer merge to identify
+                                exactly which rows are missing or extra
+          2. Value comparison : if counts match, perform cell-by-cell comparison
+                                using pandas.compare()
 
         Args:
             df1 (pd.DataFrame): Source DataFrame.
@@ -98,14 +165,35 @@ class DataQualityLibrary:
                 "between source and target DataFrames."
             )
 
-        # --- Align: select common columns, sort, reset index -------------------
+        # --- Step 0: Normalize dtypes ------------------------------------------
+        # Must happen BEFORE sort — mismatched types break sort_values too
+        df1_normalized, df2_normalized, dtype_mismatches = (
+            DataQualityLibrary._align_column_dtypes(
+                df1[common_columns],
+                df2[common_columns],
+                common_columns
+            )
+        )
+
+        if dtype_mismatches:
+            print(
+                f"\n[check_data_full_data_set] WARNING: dtype mismatches detected "
+                f"and normalized before comparison:\n"
+                + "\n".join(
+                    f"  Column '{col}': "
+                    f"source={src_dtype} → target={tgt_dtype} → normalized"
+                    for col, (src_dtype, tgt_dtype) in dtype_mismatches.items()
+                )
+            )
+
+        # --- Align: sort + reset index -----------------------------------------
         df1_aligned = (
-            df1[common_columns]
+            df1_normalized
             .sort_values(by=common_columns)
             .reset_index(drop=True)
         )
         df2_aligned = (
-            df2[common_columns]
+            df2_normalized
             .sort_values(by=common_columns)
             .reset_index(drop=True)
         )
@@ -116,7 +204,6 @@ class DataQualityLibrary:
         # --- Step 1: Row count check -------------------------------------------
         if count_df1 != count_df2:
 
-            # Outer merge with indicator to find missing/extra rows
             merged = df1_aligned.merge(
                 df2_aligned,
                 on=common_columns,
@@ -135,7 +222,6 @@ class DataQualityLibrary:
                 .reset_index(drop=True)
             )
 
-            # Build truncated display strings with row count notes
             source_display = (
                 f"{only_in_source.head(MAX_DISPLAY_ROWS).to_string(index=False)}\n"
                 f"  ... and {len(only_in_source) - MAX_DISPLAY_ROWS} more rows"
@@ -163,8 +249,9 @@ class DataQualityLibrary:
 
         # --- Step 2: Cell value comparison ------------------------------------
         # Safe to call compare() — both DataFrames now have:
+        #   - identical dtypes   (normalized in Step 0)
         #   - identical columns  (common_columns)
-        #   - identical row count (validated above)
+        #   - identical row count (validated in Step 1)
         #   - identical index    (0...n-1 from reset_index)
         try:
             mismatches = df1_aligned.compare(df2_aligned)
@@ -243,4 +330,3 @@ class DataQualityLibrary:
                 for col, count in null_report.items()
             )
         )
-
