@@ -21,7 +21,8 @@ pipeline {
         stage('Run Tests') {
             steps {
                 sh """
-                    export PYTHONPATH="${WORKSPACE}/${PROJECT_DIR}"
+                    . venv/bin/activate
+                    export PYTHONPATH=${WORKSPACE}
                     pytest "PyTest DQ Framework"/tests -m "parquet_data" \
                         --db_host="localhost" \
                         --db_port="5434" \
