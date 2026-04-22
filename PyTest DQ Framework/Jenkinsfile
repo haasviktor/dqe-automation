@@ -24,7 +24,7 @@ pipeline {
                     . venv/bin/activate
                     export PYTHONPATH=${WORKSPACE}
                     pytest "PyTest DQ Framework"/tests -m "parquet_data" \
-                        --db_host="localhost" \
+                        --db_host="postgres" \
                         --db_port="5434" \
                         --db_name="mydatabase" \
                         --db_user="${POSTGRES_SECRET_USR}" \
