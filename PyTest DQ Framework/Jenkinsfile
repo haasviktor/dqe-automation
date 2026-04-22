@@ -1,0 +1,63 @@
+pipeline {
+    agent any
+
+    environment {
+        POSTGRES_SECRET = credentials('jenkins-postgres-credentials')
+    }
+
+    stages {
+
+        stage('Install Dependencies') {
+            steps {
+                sh '''
+                    pip install -r requirements.txt
+                '''
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                sh """
+                    pytest tests -m "parquet_data" \
+                        --db_host="localhost" \
+                        --db_port="5434" \
+                        --db_name="mydatabase" \
+                        --db_user="${POSTGRES_SECRET_USR}" \
+                        --db_password="${POSTGRES_SECRET_PSW}" \
+                        --html="PyTest DQ Framework/html_report/report.html" \
+                        --self-contained-html
+                """
+            }
+        }
+
+        stage('Archive Test Report') {
+            steps {
+                // Archive the entire html_report directory, including assets
+                archiveArtifacts artifacts: 'PyTest DQ Framework/html_report/**',
+                                 allowEmptyArchive: true
+
+                // Publish the HTML report
+                publishHTML(target: [
+                    allowMissing: false,
+                    keepAll    : true,
+                    reportDir  : 'PyTest DQ Framework/html_report',
+                    reportFiles: 'report.html',
+                    reportName : 'HTML Test Report'
+                ])
+            }
+        }
+    }
+
+    post {
+        always {
+            //cleanWs()
+            echo 'Pipeline execution completed.'
+        }
+        failure {
+            echo 'Pipeline failed. Check test results for details.'
+        }
+        success {
+            echo 'Pipeline completed successfully.'
+        }
+    }
+}

@@ -1,0 +1,4 @@
+pytest
+pytest-html
+psycopg2-binary
+pandas
