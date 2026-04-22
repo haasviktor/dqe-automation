@@ -43,7 +43,7 @@ class ParquetReader:
 
             dataframes = []
             for file_path in parquet_files:
-                print(f"[ParquetReader] Reading file: {file_path}")
+                #print(f"[ParquetReader] Reading file: {file_path}")
                 dataframes.append(pd.read_parquet(file_path))
 
             combined_df = pd.concat(dataframes, ignore_index=True)
