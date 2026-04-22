@@ -10,11 +10,13 @@ pipeline {
 
         stage('Install Dependencies') {
             steps {
-                sh '''
-                        python3 -m venv venv
-                        . venv/bin/activate
-                        pip install -r "${PROJECT_DIR}"/requirements.txt
-                    '''
+                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    sh '''
+                            python3 -m venv venv
+                            . venv/bin/activate
+                            pip install -r "${PROJECT_DIR}"/requirements.txt
+                        '''
+                    }
             }
         }
 

@@ -1,5 +1,8 @@
 import pandas as pd
 
+# Max rows to display in assertion messages to avoid overwhelming output
+MAX_DISPLAY_ROWS = 10
+
 
 class DataQualityLibrary:
     """
@@ -38,7 +41,8 @@ class DataQualityLibrary:
             f"[check_duplicates] Duplicate records found.\n"
             f"  Columns checked : {column_names if column_names else 'All columns'}\n"
             f"  Total duplicates: {len(duplicates)}\n"
-            f"  Duplicate rows  :\n{duplicates.to_string(index=True)}"
+            f"  Duplicate rows (first {MAX_DISPLAY_ROWS}):\n"
+            f"{duplicates.head(MAX_DISPLAY_ROWS).to_string(index=True)}"
         )
 
     @staticmethod
@@ -68,16 +72,24 @@ class DataQualityLibrary:
         """
         Perform a full dataset comparison between two DataFrames.
 
-        Sorts both DataFrames, aligns common columns, and asserts
-        that all values match between source and target.
+        Checks are performed in two steps:
+          Step 1 — Row count comparison:
+                   If counts differ, uses an outer merge to identify
+                   exactly which rows are missing or extra, and reports them.
+
+          Step 2 — Value comparison:
+                   If counts match, performs a cell-by-cell comparison
+                   using pandas.compare() and reports any mismatched cells.
 
         Args:
             df1 (pd.DataFrame): Source DataFrame.
             df2 (pd.DataFrame): Target DataFrame.
 
         Raises:
-            AssertionError: If data mismatches are found.
+            ValueError: If no common columns exist between the DataFrames.
+            AssertionError: If row counts differ or cell values do not match.
         """
+        # --- Validate common columns -------------------------------------------
         common_columns = sorted(set(df1.columns) & set(df2.columns))
 
         if not common_columns:
@@ -86,6 +98,7 @@ class DataQualityLibrary:
                 "between source and target DataFrames."
             )
 
+        # --- Align: select common columns, sort, reset index -------------------
         df1_aligned = (
             df1[common_columns]
             .sort_values(by=common_columns)
@@ -97,6 +110,62 @@ class DataQualityLibrary:
             .reset_index(drop=True)
         )
 
+        count_df1 = len(df1_aligned)
+        count_df2 = len(df2_aligned)
+
+        # --- Step 1: Row count check -------------------------------------------
+        if count_df1 != count_df2:
+
+            # Outer merge with indicator to find missing/extra rows
+            merged = df1_aligned.merge(
+                df2_aligned,
+                on=common_columns,
+                how="outer",
+                indicator=True
+            )
+
+            only_in_source = (
+                merged[merged["_merge"] == "left_only"]
+                .drop(columns=["_merge"])
+                .reset_index(drop=True)
+            )
+            only_in_target = (
+                merged[merged["_merge"] == "right_only"]
+                .drop(columns=["_merge"])
+                .reset_index(drop=True)
+            )
+
+            # Build truncated display strings with row count notes
+            source_display = (
+                f"{only_in_source.head(MAX_DISPLAY_ROWS).to_string(index=False)}\n"
+                f"  ... and {len(only_in_source) - MAX_DISPLAY_ROWS} more rows"
+                if len(only_in_source) > MAX_DISPLAY_ROWS
+                else only_in_source.to_string(index=False)
+            )
+            target_display = (
+                f"{only_in_target.head(MAX_DISPLAY_ROWS).to_string(index=False)}\n"
+                f"  ... and {len(only_in_target) - MAX_DISPLAY_ROWS} more rows"
+                if len(only_in_target) > MAX_DISPLAY_ROWS
+                else only_in_target.to_string(index=False)
+            )
+
+            assert False, (
+                f"[check_data_full_data_set] Row count mismatch "
+                f"between source and target.\n\n"
+                f"  Source row count : {count_df1}\n"
+                f"  Target row count : {count_df2}\n"
+                f"  Difference       : {abs(count_df1 - count_df2)}\n\n"
+                f"  Rows only in source [{len(only_in_source)} row(s)]:\n"
+                f"{source_display}\n\n"
+                f"  Rows only in target [{len(only_in_target)} row(s)]:\n"
+                f"{target_display}"
+            )
+
+        # --- Step 2: Cell value comparison ------------------------------------
+        # Safe to call compare() — both DataFrames now have:
+        #   - identical columns  (common_columns)
+        #   - identical row count (validated above)
+        #   - identical index    (0...n-1 from reset_index)
         try:
             mismatches = df1_aligned.compare(df2_aligned)
         except ValueError as e:
@@ -105,10 +174,20 @@ class DataQualityLibrary:
                 f"  Error: {e}"
             )
 
+        mismatch_display = (
+            f"{mismatches.head(MAX_DISPLAY_ROWS).to_string()}\n"
+            f"  ... and {len(mismatches) - MAX_DISPLAY_ROWS} more rows"
+            if len(mismatches) > MAX_DISPLAY_ROWS
+            else mismatches.to_string()
+        )
+
         assert mismatches.empty, (
-            f"[check_data_full_data_set] Data mismatch found between source and target.\n"
-            f"  Columns compared : {common_columns}\n"
-            f"  Mismatched cells :\n{mismatches.to_string()}"
+            f"[check_data_full_data_set] Cell value mismatch "
+            f"between source and target.\n\n"
+            f"  Columns compared     : {common_columns}\n"
+            f"  Total mismatched rows: {len(mismatches)}\n\n"
+            f"  Mismatched cells (self=source, other=target):\n"
+            f"{mismatch_display}"
         )
 
     @staticmethod
@@ -164,3 +243,4 @@ class DataQualityLibrary:
                 for col, count in null_report.items()
             )
         )
+
