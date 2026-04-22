@@ -162,3 +162,17 @@ def test_check_not_null_values(target_data, data_quality_library):
         target_data,
         column_names=["facility_type", "full_name", "sum_treatment_cost"]
     )
+
+@pytest.mark.parquet_data
+@pytest.mark.patient_sum_treatment_cost_per_facility_type
+def test_check_no_negative_treatment_cost(target_data, data_quality_library):
+    """
+    Validity test: Verify sum_treatment_cost contains no negative values.
+
+    Treatment costs represent financial amounts and must never be negative.
+    A negative value would indicate a data pipeline or source data issue.
+    """
+    data_quality_library.check_no_negative_values(
+        target_data,
+        column_names=["sum_treatment_cost"]
+    )

@@ -1,7 +1,7 @@
 import pandas as pd
 
 # Max rows to display in assertion messages to avoid overwhelming output
-MAX_DISPLAY_ROWS = 10
+MAX_DISPLAY_ROWS = 50
 
 
 class DataQualityLibrary:
@@ -14,6 +14,7 @@ class DataQualityLibrary:
         - check_data_full_data_set   : Full dataset comparison
         - check_dataset_is_not_empty : Consistency (non-empty) validation
         - check_not_null_values      : Validity (not-null) validation
+        - check_no_negative_values   : Validity (non-negative) validation
     """
 
     @staticmethod
@@ -328,5 +329,42 @@ class DataQualityLibrary:
             + "\n".join(
                 f"  Column '{col}': {count} null value(s)"
                 for col, count in null_report.items()
+            )
+        )
+
+    @staticmethod
+    def check_no_negative_values(
+        df: pd.DataFrame, column_names: list
+    ) -> None:
+        """
+        Check that specified numeric columns contain no negative values.
+
+        Args:
+            df (pd.DataFrame): The DataFrame to validate.
+            column_names (list): Columns to check for negative values.
+
+        Raises:
+            ValueError: If a specified column is not found in the DataFrame.
+            AssertionError: If negative values are found in any column.
+        """
+        missing_columns = [c for c in column_names if c not in df.columns]
+        if missing_columns:
+            raise ValueError(
+                f"[check_no_negative_values] Columns not found in DataFrame: "
+                f"{missing_columns}"
+            )
+
+        negative_report = {}
+        for col in column_names:
+            negative_rows = df[df[col] < 0]
+            if not negative_rows.empty:
+                negative_report[col] = negative_rows[[col]]
+
+        assert not negative_report, (
+            f"[check_no_negative_values] Negative values found in the following columns:\n"
+            + "\n".join(
+                f"  Column '{col}': {len(rows)} negative value(s)\n"
+                f"  {rows.head(MAX_DISPLAY_ROWS).to_string(index=True)}"
+                for col, rows in negative_report.items()
             )
         )
